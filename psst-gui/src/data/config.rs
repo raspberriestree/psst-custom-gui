@@ -121,6 +121,7 @@ pub struct Config {
     pub slider_scroll_scale: SliderScrollScale,
     pub sort_order: SortOrder,
     pub sort_criteria: SortCriteria,
+    pub album_view_mode: AlbumViewMode,
     pub paginated_limit: usize,
     pub seek_duration: usize,
     pub lastfm_session_key: Option<String>,
@@ -149,6 +150,7 @@ impl Default for Config {
             slider_scroll_scale: Default::default(),
             sort_order: Default::default(),
             sort_criteria: Default::default(),
+            album_view_mode: Default::default(),
             paginated_limit: 500,
             seek_duration: 10,
             lastfm_session_key: None,
@@ -347,6 +349,13 @@ pub enum SortCriteria {
     DateAdded,
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Data, Serialize, Deserialize, Default)]
+pub enum AlbumViewMode {
+    #[default]
+    List,
+    Grid,
+}
+
 fn get_dir_size(path: &Path) -> Option<u64> {
     fs::read_dir(path).ok()?.try_fold(0, |acc, entry| {
         let entry = entry.ok()?;
@@ -357,4 +366,27 @@ fn get_dir_size(path: &Path) -> Option<u64> {
         };
         Some(acc + size)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_album_view_mode_default_and_serde() {
+        assert_eq!(AlbumViewMode::default(), AlbumViewMode::List);
+
+        let json_list = serde_json::to_string(&AlbumViewMode::List).unwrap();
+        assert_eq!(json_list, "\"List\"");
+
+        let json_grid = serde_json::to_string(&AlbumViewMode::Grid).unwrap();
+        assert_eq!(json_grid, "\"Grid\"");
+
+        let deserialized: AlbumViewMode = serde_json::from_str("\"Grid\"").unwrap();
+        assert_eq!(deserialized, AlbumViewMode::Grid);
+
+        // Test Config deserialization when album_view_mode is omitted (backward compatibility)
+        let config: Config = serde_json::from_str("{}").unwrap();
+        assert_eq!(config.album_view_mode, AlbumViewMode::List);
+    }
 }

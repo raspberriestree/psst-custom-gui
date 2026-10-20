@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use druid::{
-    widget::{CrossAxisAlignment, Flex, Label, LineBreaking, List, ViewSwitcher},
-    LensExt, LocalizedString, Menu, MenuItem, Selector, Size, UnitPoint, Widget, WidgetExt,
+    widget::{CrossAxisAlignment, Flex, Label, LineBreaking, List},
+    LensExt, LocalizedString, Menu, MenuItem, Selector, Size, Widget, WidgetExt,
 };
 
 use crate::{
@@ -13,7 +13,7 @@ use crate::{
     },
     ui::playable::PlayableIter,
     webapi::WebApi,
-    widget::{icons, Async, MyWidgetExt, RemoteImage},
+    widget::{Async, MyWidgetExt, RemoteImage},
 };
 
 use super::{artist, library, playable, theme, track, utils};
@@ -102,41 +102,50 @@ fn rounded_cover_widget(size: f64) -> impl Widget<Arc<Album>> {
 }
 
 pub fn album_widget(horizontal: bool) -> impl Widget<WithCtx<Arc<Album>>> {
-    let (album_cover_size, album_name_layout) = if horizontal {
-        (16.0, Flex::column())
-    } else {
-        (6.0, Flex::row())
-    };
+    let album_cover_size = if horizontal { 16.0 } else { 6.0 };
     let album_cover = rounded_cover_widget(theme::grid(album_cover_size));
 
-    let album_name = album_name_layout
-        .with_child(
-            Label::raw()
-                .with_font(theme::UI_FONT_MEDIUM)
-                .with_line_break_mode(LineBreaking::Clip)
-                .lens(Album::name.in_arc()),
-        )
-        .with_spacer(theme::grid(0.5))
-        .with_child(ViewSwitcher::new(
-            |album: &Arc<Album>, _| album.has_explicit(),
-            |selector: &bool, _, _| match selector {
-                true => icons::EXPLICIT.scale(theme::ICON_SIZE_TINY).boxed(),
-                false => Box::new(Flex::column()),
-            },
-        ));
-
-    let album_artists = List::new(|| {
+    // In grid mode use a dynamic label with ellipsis truncation so long names
+    // never overflow the fixed-width card. In list mode use the raw lens-based
+    // label so data updates are efficient.
+    let album_name: Box<dyn Widget<Arc<Album>>> = if horizontal {
+        Label::dynamic(|album: &Arc<Album>, _| truncate_ellipsis(&album.name, 22))
+            .with_font(theme::UI_FONT_MEDIUM)
+            .with_line_break_mode(LineBreaking::Clip)
+            .boxed()
+    } else {
         Label::raw()
-            .with_text_size(theme::TEXT_SIZE_SMALL)
-            .with_line_break_mode(LineBreaking::WordWrap)
-            .lens(ArtistLink::name)
-    })
-    .horizontal()
-    .with_spacing(theme::grid(1.0))
-    .lens(Album::artists.in_arc());
+            .with_font(theme::UI_FONT_MEDIUM)
+            .with_line_break_mode(LineBreaking::Clip)
+            .lens(Album::name.in_arc())
+            .boxed()
+    };
+
+    // In grid mode render a single clipped/truncated line with all artists
+    // joined by ", ". In list mode keep the original horizontal list widget.
+    let album_artists: Box<dyn Widget<Arc<Album>>> = if horizontal {
+        Label::dynamic(|album: &Arc<Album>, _| {
+            let names: Vec<&str> = album.artists.iter().map(|a| a.name.as_ref()).collect();
+            truncate_ellipsis(&names.join(", "), 26)
+        })
+        .with_text_size(theme::TEXT_SIZE_SMALL)
+        .with_line_break_mode(LineBreaking::Clip)
+        .boxed()
+    } else {
+        List::new(|| {
+            Label::raw()
+                .with_text_size(theme::TEXT_SIZE_SMALL)
+                .with_line_break_mode(LineBreaking::WordWrap)
+                .lens(ArtistLink::name)
+        })
+        .horizontal()
+        .with_spacing(theme::grid(1.0))
+        .lens(Album::artists.in_arc())
+        .boxed()
+    };
 
     let album_date = Label::<Arc<Album>>::dynamic(|album, _| album.release_year())
-        .with_line_break_mode(LineBreaking::WordWrap)
+        .with_line_break_mode(LineBreaking::Clip)
         .with_text_size(theme::TEXT_SIZE_SMALL)
         .with_text_color(theme::PLACEHOLDER_COLOR);
 
@@ -152,8 +161,10 @@ pub fn album_widget(horizontal: bool) -> impl Widget<WithCtx<Arc<Album>>> {
                     .with_child(album_artists)
                     .with_spacer(1.0)
                     .with_child(album_date)
-                    .align_horizontal(UnitPoint::CENTER)
-                    .align_vertical(UnitPoint::TOP)
+                    // Fix sizing: keep a fixed height to prevent overflow but do
+                    // NOT wrap in Align(CENTER), which was causing the centered
+                    // appearance. cross_axis_alignment::Start on the column above
+                    // already takes care of left-aligning the children.
                     .fix_size(theme::grid(16.0), theme::grid(8.0)),
             )
             .align_left()
@@ -183,6 +194,23 @@ pub fn album_widget(horizontal: bool) -> impl Widget<WithCtx<Arc<Album>>> {
             ctx.submit_command(cmd::NAVIGATE.with(Nav::AlbumDetail(album.data.link(), None)));
         })
         .context_menu(album_ctx_menu)
+}
+
+/// Truncates `s` to at most `max_chars` Unicode scalar values, appending the
+/// ellipsis character `…` when the string is shortened. Used in fixed-width
+/// grid cards where long names would otherwise overflow their container.
+///
+/// The `max_chars` limit is a character-count approximation; the exact number
+/// of characters that fit depends on the font and glyph widths at runtime.
+fn truncate_ellipsis(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        s.to_string()
+    } else {
+        s.chars()
+            .take(max_chars.saturating_sub(1))
+            .collect::<String>()
+            + "…"
+    }
 }
 
 fn album_ctx_menu(album: &WithCtx<Arc<Album>>) -> Menu<AppState> {

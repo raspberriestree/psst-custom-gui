@@ -1,19 +1,20 @@
 use std::sync::Arc;
 
 use druid::{
-    widget::{Flex, List},
+    widget::{Flex, List, ViewSwitcher},
     LensExt, Selector, Widget, WidgetExt,
 };
 
 use crate::{
     cmd,
     data::{
-        Album, AlbumLink, AppState, Ctx, Library, SavedAlbums, SavedTracks, Show, ShowLink, Track,
-        TrackId,
+        Album, AlbumLink, AlbumViewMode, AppState, Ctx, Library, SavedAlbums, SavedTracks, Show,
+        ShowLink, Track, TrackId,
     },
     ui::home::{shows_that_you_might_like, your_shows},
+    ui::theme,
     webapi::WebApi,
-    widget::{Async, MyWidgetExt},
+    widget::{Async, Grid, MyWidgetExt},
 };
 
 use super::{album, playable, track, utils};
@@ -106,17 +107,9 @@ pub fn saved_tracks_widget() -> impl Widget<AppState> {
 }
 
 pub fn saved_albums_widget() -> impl Widget<AppState> {
-    Async::new(
-        utils::spinner_widget,
-        || List::new(|| album::album_widget(false)).lens(Ctx::map(SavedAlbums::albums)),
-        utils::error_widget,
-    )
-    .lens(
-        Ctx::make(
-            AppState::common_ctx,
-            AppState::library.then(Library::saved_albums.in_arc()),
-        )
-        .then(Ctx::in_promise()),
+    ViewSwitcher::new(
+        |data: &AppState, _| data.config.album_view_mode,
+        |mode, _, _| saved_albums_collection(*mode).boxed(),
     )
     .on_command_async(
         LOAD_ALBUMS,
@@ -163,6 +156,31 @@ pub fn saved_albums_widget() -> impl Widget<AppState> {
                 data.info_alert("Album removed from library.");
             }
         },
+    )
+}
+
+fn saved_albums_collection(mode: AlbumViewMode) -> impl Widget<AppState> {
+    Async::new(
+        utils::spinner_widget,
+        move || match mode {
+            AlbumViewMode::List => List::new(|| album::album_widget(false))
+                .lens(Ctx::map(SavedAlbums::albums))
+                .boxed(),
+            AlbumViewMode::Grid => Grid::new(
+                || album::album_widget(true),
+                theme::grid(18.0),
+            )
+            .lens(Ctx::map(SavedAlbums::albums))
+            .boxed(),
+        },
+        utils::error_widget,
+    )
+    .lens(
+        Ctx::make(
+            AppState::common_ctx,
+            AppState::library.then(Library::saved_albums.in_arc()),
+        )
+        .then(Ctx::in_promise()),
     )
 }
 

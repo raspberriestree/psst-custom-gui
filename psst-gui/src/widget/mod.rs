@@ -1,6 +1,7 @@
 mod checkbox;
 mod dispatcher;
 mod empty;
+mod grid;
 pub mod fill_between;
 pub mod icons;
 mod link;
@@ -22,6 +23,7 @@ pub use checkbox::Checkbox;
 pub use dispatcher::ViewDispatcher;
 use druid_shell::Cursor;
 pub use empty::Empty;
+pub use grid::Grid;
 pub use link::Link;
 pub use maybe::Maybe;
 pub use overlay::Overlay;

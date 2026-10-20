@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::{
-    data::{Nav, PlaybackPayload, QueueBehavior, QueueEntry},
+    data::{AlbumViewMode, Nav, PlaybackPayload, QueueBehavior, QueueEntry},
     ui::find::Find,
 };
 
@@ -57,6 +57,9 @@ pub const ADD_TO_QUEUE: Selector<(QueueEntry, PlaybackItem)> = Selector::new("ap
 pub const PLAY_QUEUE_BEHAVIOR: Selector<QueueBehavior> = Selector::new("app.play-queue-behavior");
 pub const PLAY_SEEK: Selector<f64> = Selector::new("app.play-seek");
 pub const SKIP_TO_POSITION: Selector<u64> = Selector::new("app.skip-to-position");
+
+// Album library display
+pub const SET_ALBUM_VIEW_MODE: Selector<AlbumViewMode> = Selector::new("app.album.set-view-mode");
 
 // Sorting control
 pub const SORT_BY_DATE_ADDED: Selector = Selector::new("app.sort-by-date-added");

@@ -71,6 +71,7 @@ impl Album {
         }
     }
 
+    #[allow(dead_code)]
     pub fn has_explicit(&self) -> bool {
         self.tracks.iter().any(|t| t.explicit)
     }

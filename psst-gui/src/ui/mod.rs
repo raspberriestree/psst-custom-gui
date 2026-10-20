@@ -7,8 +7,8 @@ use crate::{
         AfterDelay, AlertCleanupController, NavController, SessionController, SortController,
     },
     data::{
-        config::SortOrder, Alert, AlertStyle, AppState, Config, Nav, Playable, Playback, Route,
-        ALERT_DURATION,
+        config::SortOrder, Alert, AlertStyle, AlbumViewMode, AppState, Config, Nav, Playable,
+        Playback, Route, ALERT_DURATION,
     },
     webapi::WebApi,
     widget::{
@@ -247,6 +247,7 @@ fn root_widget() -> impl Widget<AppState> {
         .must_fill_main_axis(true)
         .with_child(topbar_back_button_widget())
         .with_flex_child(topbar_title_widget(), 1.0)
+        .with_child(topbar_album_view_widget())
         .with_child(topbar_sort_widget())
         .background(Border::Bottom.with_color(theme::BACKGROUND_DARK));
 
@@ -268,6 +269,12 @@ fn root_widget() -> impl Widget<AppState> {
         .controller(SessionController)
         .controller(NavController)
         .controller(SortController)
+        .on_command(cmd::SET_ALBUM_VIEW_MODE, |_, &mode, data| {
+            if data.config.album_view_mode != mode {
+                data.config.album_view_mode = mode;
+                data.config.save();
+            }
+        })
         .on_command_async(
             cmd::LOAD_TRACK_CREDITS,
             |track: Arc<Track>| {
@@ -492,6 +499,37 @@ fn volume_slider() -> impl Widget<AppState> {
                 data.playback.volume = (data.playback.volume + scaled_delta).clamp(0.0, 1.0);
             },
         )
+}
+
+fn topbar_album_view_widget() -> impl Widget<AppState> {
+    Either::new(
+        |data: &AppState, _| matches!(data.nav, Nav::SavedAlbums),
+        Flex::row()
+            .with_child(album_view_mode_button(
+                AlbumViewMode::List,
+                &icons::LIST_VIEW,
+            ))
+            .with_child(album_view_mode_button(
+                AlbumViewMode::Grid,
+                &icons::GRID_VIEW,
+            )),
+        Empty.boxed(),
+    )
+    .padding(theme::grid(1.0))
+}
+
+fn album_view_mode_button(
+    mode: AlbumViewMode,
+    icon: &icons::SvgIcon,
+) -> impl Widget<AppState> {
+    icon.scale(theme::ICON_SIZE_MEDIUM)
+        .padding(theme::grid(1.0))
+        .link()
+        .rounded(theme::BUTTON_BORDER_RADIUS)
+        .active(move |data: &AppState, _| data.config.album_view_mode == mode)
+        .on_left_click(move |ctx, _, _, _| {
+            ctx.submit_command(cmd::SET_ALBUM_VIEW_MODE.with(mode));
+        })
 }
 
 fn topbar_sort_widget() -> impl Widget<AppState> {
