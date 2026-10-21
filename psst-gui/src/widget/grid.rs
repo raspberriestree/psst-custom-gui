@@ -79,6 +79,7 @@ impl<C: Data, T: ListIter<C>> Widget<T> for Grid<C> {
         if self.update_child_count(data, env) {
             ctx.children_changed();
         }
+        ctx.request_layout();
     }
 
     fn layout(&mut self, ctx: &mut LayoutCtx, bc: &BoxConstraints, data: &T, env: &Env) -> Size {

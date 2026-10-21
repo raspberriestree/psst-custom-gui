@@ -120,8 +120,13 @@ pub fn saved_albums_widget() -> impl Widget<AppState> {
             });
         },
         |_, data, r| {
+            let criteria = data.config.album_sort_criteria;
+            let order = data.config.album_sort_order;
             data.with_library_mut(|library| {
                 library.saved_albums.update(r);
+                if let Some(saved) = library.saved_albums.resolved_mut() {
+                    saved.sort(criteria, order);
+                }
             });
         },
     )
@@ -129,8 +134,13 @@ pub fn saved_albums_widget() -> impl Widget<AppState> {
         SAVE_ALBUM,
         |a| WebApi::global().save_album(&a.id),
         |_, data, a| {
+            let criteria = data.config.album_sort_criteria;
+            let order = data.config.album_sort_order;
             data.with_library_mut(move |library| {
                 library.add_album(a);
+                if let Some(saved) = library.saved_albums.resolved_mut() {
+                    saved.sort(criteria, order);
+                }
             });
         },
         |_, data, (_, r)| {

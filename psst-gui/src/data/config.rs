@@ -122,6 +122,10 @@ pub struct Config {
     pub sort_order: SortOrder,
     pub sort_criteria: SortCriteria,
     pub album_view_mode: AlbumViewMode,
+    pub album_sort_criteria: AlbumSortCriteria,
+    /// Direction for the album sort. Defaults to `Descending` so the initial
+    /// "Date Added" order matches the Spotify API (newest saved first).
+    pub album_sort_order: SortOrder,
     pub paginated_limit: usize,
     pub seek_duration: usize,
     pub lastfm_session_key: Option<String>,
@@ -151,6 +155,9 @@ impl Default for Config {
             sort_order: Default::default(),
             sort_criteria: Default::default(),
             album_view_mode: Default::default(),
+            album_sort_criteria: Default::default(),
+            // Descending = newest saved first, matching the Spotify API default order.
+            album_sort_order: SortOrder::Descending,
             paginated_limit: 500,
             seek_duration: 10,
             lastfm_session_key: None,
@@ -356,6 +363,18 @@ pub enum AlbumViewMode {
     Grid,
 }
 
+/// Criteria used to sort the saved-albums list.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Data, Serialize, Deserialize, Default)]
+pub enum AlbumSortCriteria {
+    /// Keep the original Spotify order (most recently saved first).
+    #[default]
+    DateAdded,
+    /// Sort alphabetically by album title.
+    AlbumName,
+    /// Sort alphabetically by the first listed artist.
+    Artist,
+}
+
 fn get_dir_size(path: &Path) -> Option<u64> {
     fs::read_dir(path).ok()?.try_fold(0, |acc, entry| {
         let entry = entry.ok()?;
@@ -388,5 +407,21 @@ mod tests {
         // Test Config deserialization when album_view_mode is omitted (backward compatibility)
         let config: Config = serde_json::from_str("{}").unwrap();
         assert_eq!(config.album_view_mode, AlbumViewMode::List);
+        assert_eq!(config.album_sort_criteria, AlbumSortCriteria::DateAdded);
+        assert_eq!(config.album_sort_order, SortOrder::Descending);
+    }
+
+    #[test]
+    fn test_album_sort_criteria_default_and_serde() {
+        assert_eq!(AlbumSortCriteria::default(), AlbumSortCriteria::DateAdded);
+
+        let json_name = serde_json::to_string(&AlbumSortCriteria::AlbumName).unwrap();
+        assert_eq!(json_name, "\"AlbumName\"");
+
+        let json_artist = serde_json::to_string(&AlbumSortCriteria::Artist).unwrap();
+        assert_eq!(json_artist, "\"Artist\"");
+
+        let deserialized: AlbumSortCriteria = serde_json::from_str("\"Artist\"").unwrap();
+        assert_eq!(deserialized, AlbumSortCriteria::Artist);
     }
 }

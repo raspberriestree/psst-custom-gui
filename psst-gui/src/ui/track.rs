@@ -50,7 +50,7 @@ impl Display {
     }
 }
 
-pub fn playable_widget(track: &Track, display: Display) -> impl Widget<PlayRow<Arc<Track>>> {
+pub fn playable_widget(_track: &Track, display: Display) -> impl Widget<PlayRow<Arc<Track>>> {
     let mut main_row = Flex::row();
     let mut major = Flex::row().cross_axis_alignment(CrossAxisAlignment::Center);
     let mut minor = Flex::row();
@@ -93,11 +93,6 @@ pub fn playable_widget(track: &Track, display: Display) -> impl Widget<PlayRow<A
     }
 
     let mut minor_row = Flex::row();
-    if track.explicit && (display.artist || display.album) {
-        let icon = icons::EXPLICIT.scale(theme::ICON_SIZE_TINY);
-        minor_row.add_child(icon);
-        minor_row.add_spacer(theme::grid(0.5));
-    }
     let minor_label = Label::dynamic(move |row: &PlayRow<Arc<Track>>, _| {
         let artist = if display.artist {
             row.item.artist_names()

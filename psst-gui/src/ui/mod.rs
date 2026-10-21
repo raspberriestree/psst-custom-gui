@@ -7,8 +7,8 @@ use crate::{
         AfterDelay, AlertCleanupController, NavController, SessionController, SortController,
     },
     data::{
-        config::SortOrder, Alert, AlertStyle, AlbumViewMode, AppState, Config, Nav, Playable,
-        Playback, Route, ALERT_DURATION,
+        config::SortOrder, Alert, AlertStyle, AlbumSortCriteria, AlbumViewMode, AppState, Config,
+        Nav, Playable, Playback, Route, ALERT_DURATION,
     },
     webapi::WebApi,
     widget::{
@@ -248,6 +248,7 @@ fn root_widget() -> impl Widget<AppState> {
         .with_child(topbar_back_button_widget())
         .with_flex_child(topbar_title_widget(), 1.0)
         .with_child(topbar_album_view_widget())
+        .with_child(topbar_album_sort_widget())
         .with_child(topbar_sort_widget())
         .background(Border::Bottom.with_color(theme::BACKGROUND_DARK));
 
@@ -274,6 +275,39 @@ fn root_widget() -> impl Widget<AppState> {
                 data.config.album_view_mode = mode;
                 data.config.save();
             }
+        })
+        .on_command(cmd::SET_ALBUM_SORT_CRITERIA, |_, &criteria, data| {
+            let prev = data.config.album_sort_criteria;
+            data.config.album_sort_criteria = criteria;
+            if prev != criteria {
+                data.config.album_sort_order = match criteria {
+                    AlbumSortCriteria::DateAdded => SortOrder::Descending,
+                    AlbumSortCriteria::AlbumName | AlbumSortCriteria::Artist => {
+                        SortOrder::Ascending
+                    }
+                };
+            }
+            data.config.save();
+            let order = data.config.album_sort_order;
+            data.with_library_mut(|lib| {
+                if let Some(saved) = lib.saved_albums.resolved_mut() {
+                    saved.sort(criteria, order);
+                }
+            });
+        })
+        .on_command(cmd::TOGGLE_ALBUM_SORT_ORDER, |_, _, data| {
+            let new_order = match data.config.album_sort_order {
+                SortOrder::Ascending => SortOrder::Descending,
+                SortOrder::Descending => SortOrder::Ascending,
+            };
+            data.config.album_sort_order = new_order;
+            data.config.save();
+            let criteria = data.config.album_sort_criteria;
+            data.with_library_mut(|lib| {
+                if let Some(saved) = lib.saved_albums.resolved_mut() {
+                    saved.sort(criteria, new_order);
+                }
+            });
         })
         .on_command_async(
             cmd::LOAD_TRACK_CREDITS,
@@ -530,6 +564,88 @@ fn album_view_mode_button(
         .on_left_click(move |ctx, _, _, _| {
             ctx.submit_command(cmd::SET_ALBUM_VIEW_MODE.with(mode));
         })
+}
+
+fn topbar_album_sort_widget() -> impl Widget<AppState> {
+    let criteria_label = Label::dynamic(|data: &AppState, _| {
+        let name = match data.config.album_sort_criteria {
+            AlbumSortCriteria::DateAdded => "Date Added",
+            AlbumSortCriteria::AlbumName => "Album Name",
+            AlbumSortCriteria::Artist => "Artist",
+        };
+        format!("{name} ▾")
+    })
+    .with_text_size(theme::TEXT_SIZE_SMALL);
+
+    let criteria_btn = criteria_label
+        .padding((theme::grid(1.0), theme::grid(0.5)))
+        .link()
+        .rounded(theme::BUTTON_BORDER_RADIUS)
+        .on_left_click(|ctx, event, data, _| {
+            ctx.show_context_menu(album_sorting_menu(data), event.window_pos);
+        })
+        .context_menu(album_sorting_menu);
+
+    let up_icon = icons::UP.scale((10.0, theme::grid(2.0)));
+    let down_icon = icons::DOWN.scale((10.0, theme::grid(2.0)));
+
+    let ascending_btn = up_icon
+        .padding(theme::grid(1.0))
+        .link()
+        .rounded(theme::BUTTON_BORDER_RADIUS)
+        .on_left_click(|ctx, _, _, _| {
+            ctx.submit_command(cmd::TOGGLE_ALBUM_SORT_ORDER);
+        })
+        .context_menu(album_sorting_menu)
+        .boxed();
+
+    let descending_btn = down_icon
+        .padding(theme::grid(1.0))
+        .link()
+        .rounded(theme::BUTTON_BORDER_RADIUS)
+        .on_left_click(|ctx, _, _, _| {
+            ctx.submit_command(cmd::TOGGLE_ALBUM_SORT_ORDER);
+        })
+        .context_menu(album_sorting_menu)
+        .boxed();
+
+    let sort_direction = Either::new(
+        |data: &AppState, _| data.config.album_sort_order == SortOrder::Ascending,
+        ascending_btn,
+        descending_btn,
+    );
+
+    let content = Flex::row()
+        .with_child(criteria_btn)
+        .with_spacer(theme::grid(0.5))
+        .with_child(sort_direction);
+
+    Either::new(
+        |data: &AppState, _| matches!(data.nav, Nav::SavedAlbums),
+        content,
+        Empty.boxed(),
+    )
+    .padding(theme::grid(1.0))
+}
+
+fn album_sorting_menu(state: &AppState) -> Menu<AppState> {
+    let mut by_date = MenuItem::new("Date Added")
+        .command(cmd::SET_ALBUM_SORT_CRITERIA.with(AlbumSortCriteria::DateAdded));
+    let mut by_name = MenuItem::new("Album Name")
+        .command(cmd::SET_ALBUM_SORT_CRITERIA.with(AlbumSortCriteria::AlbumName));
+    let mut by_artist = MenuItem::new("Artist")
+        .command(cmd::SET_ALBUM_SORT_CRITERIA.with(AlbumSortCriteria::Artist));
+
+    match state.config.album_sort_criteria {
+        AlbumSortCriteria::DateAdded => by_date = by_date.selected(true),
+        AlbumSortCriteria::AlbumName => by_name = by_name.selected(true),
+        AlbumSortCriteria::Artist => by_artist = by_artist.selected(true),
+    }
+
+    Menu::new("Sort Albums by")
+        .entry(by_date)
+        .entry(by_name)
+        .entry(by_artist)
 }
 
 fn topbar_sort_widget() -> impl Widget<AppState> {

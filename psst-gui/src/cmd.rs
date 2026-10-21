@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::{
-    data::{AlbumViewMode, Nav, PlaybackPayload, QueueBehavior, QueueEntry},
+    data::{AlbumSortCriteria, AlbumViewMode, Nav, PlaybackPayload, QueueBehavior, QueueEntry},
     ui::find::Find,
 };
 
@@ -60,6 +60,11 @@ pub const SKIP_TO_POSITION: Selector<u64> = Selector::new("app.skip-to-position"
 
 // Album library display
 pub const SET_ALBUM_VIEW_MODE: Selector<AlbumViewMode> = Selector::new("app.album.set-view-mode");
+
+// Album sort
+pub const SET_ALBUM_SORT_CRITERIA: Selector<AlbumSortCriteria> =
+    Selector::new("app.album.set-sort-criteria");
+pub const TOGGLE_ALBUM_SORT_ORDER: Selector = Selector::new("app.album.toggle-sort-order");
 
 // Sorting control
 pub const SORT_BY_DATE_ADDED: Selector = Selector::new("app.sort-by-date-added");

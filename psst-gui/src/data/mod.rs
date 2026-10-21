@@ -38,7 +38,8 @@ pub use crate::data::{
         Artist, ArtistAlbums, ArtistDetail, ArtistInfo, ArtistLink, ArtistOverview, ArtistStats,
     },
     config::{
-        AlbumViewMode, AudioQuality, Authentication, Config, Preferences, PreferencesTab, Theme,
+        AlbumSortCriteria, AlbumViewMode, AudioQuality, Authentication, Config, Preferences,
+        PreferencesTab, Theme,
     },
     ctx::Ctx,
     find::{FindQuery, Finder, MatchFindQuery},
@@ -377,15 +378,13 @@ impl Library {
 
     pub fn add_album(&mut self, album: Arc<Album>) {
         if let Some(saved) = self.saved_albums.resolved_mut() {
-            saved.set.insert(album.id.clone());
-            saved.albums.push_front(album);
+            saved.add(album);
         }
     }
 
     pub fn remove_album(&mut self, album_id: &str) {
         if let Some(saved) = self.saved_albums.resolved_mut() {
-            saved.set.remove(album_id);
-            saved.albums.retain(|a| a.id.as_ref() != album_id);
+            saved.remove(album_id);
         }
     }
 
@@ -519,6 +518,12 @@ impl SavedTracks {
 
 #[derive(Clone, Default, Data, Lens)]
 pub struct SavedAlbums {
+    /// Original order returned by the Spotify API (most recently saved first).
+    /// Kept so we can restore the DateAdded ordering after the user switches
+    /// back from a name/artist sort.
+    #[data(ignore)]
+    original_order: Vector<Arc<Album>>,
+    /// The currently displayed (possibly sorted) album list.
     pub albums: Vector<Arc<Album>>,
     pub set: HashSet<Arc<str>>,
 }
@@ -526,7 +531,76 @@ pub struct SavedAlbums {
 impl SavedAlbums {
     pub fn new(albums: Vector<Arc<Album>>) -> Self {
         let set = albums.iter().map(|a| a.id.clone()).collect();
-        Self { albums, set }
+        Self {
+            original_order: albums.clone(),
+            albums,
+            set,
+        }
+    }
+
+    pub fn add(&mut self, album: Arc<Album>) {
+        self.set.insert(album.id.clone());
+        self.original_order.push_front(album.clone());
+        self.albums.push_front(album);
+    }
+
+    pub fn remove(&mut self, album_id: &str) {
+        self.set.remove(album_id);
+        self.original_order.retain(|a| a.id.as_ref() != album_id);
+        self.albums.retain(|a| a.id.as_ref() != album_id);
+    }
+
+    /// Re-order `albums` according to `criteria` and `order`.
+    ///
+    /// `original_order` is always the reference; calling this method multiple
+    /// times with the same arguments is idempotent.
+    pub fn sort(
+        &mut self,
+        criteria: config::AlbumSortCriteria,
+        order: config::SortOrder,
+    ) {
+        use config::{AlbumSortCriteria, SortOrder};
+
+        if criteria == AlbumSortCriteria::DateAdded {
+            // Restore the API order (newest saved = index 0).
+            self.albums = self.original_order.clone();
+            if order == SortOrder::Ascending {
+                // Ascending date = oldest first → reverse the API list.
+                let mut v: Vec<Arc<Album>> = self.albums.iter().cloned().collect();
+                v.reverse();
+                self.albums = v.into_iter().collect();
+            }
+        } else {
+            let mut v: Vec<Arc<Album>> = self.original_order.iter().cloned().collect();
+            v.sort_by(|a, b| {
+                let cmp = match criteria {
+                    AlbumSortCriteria::AlbumName => a
+                        .name
+                        .to_lowercase()
+                        .cmp(&b.name.to_lowercase()),
+                    AlbumSortCriteria::Artist => {
+                        let a_name = a
+                            .artists
+                            .front()
+                            .map(|ar| ar.name.to_lowercase())
+                            .unwrap_or_default();
+                        let b_name = b
+                            .artists
+                            .front()
+                            .map(|ar| ar.name.to_lowercase())
+                            .unwrap_or_default();
+                        a_name.cmp(&b_name)
+                    }
+                    AlbumSortCriteria::DateAdded => unreachable!(),
+                };
+                if order == SortOrder::Descending {
+                    cmp.reverse()
+                } else {
+                    cmp
+                }
+            });
+            self.albums = v.into_iter().collect();
+        }
     }
 }
 
@@ -602,4 +676,99 @@ impl Alert {
 pub enum AlertStyle {
     Error,
     Info,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dummy_album(id: &str, name: &str, artist: &str) -> Arc<Album> {
+        Arc::new(Album {
+            id: Arc::from(id),
+            name: Arc::from(name),
+            album_type: crate::data::AlbumType::Album,
+            images: Vector::new(),
+            artists: Vector::from(vec![ArtistLink {
+                id: Arc::from(artist),
+                name: Arc::from(artist),
+            }]),
+            copyrights: Vector::new(),
+            label: Arc::from(""),
+            tracks: Vector::new(),
+            release_date: None,
+            release_date_precision: None,
+        })
+    }
+
+    #[test]
+    fn test_saved_albums_sort() {
+        let a1 = dummy_album("1", "Zebra", "Bob");
+        let a2 = dummy_album("2", "Apple", "Charlie");
+        let a3 = dummy_album("3", "Banana", "Alice");
+
+        let mut saved = SavedAlbums::new(Vector::from(vec![a1.clone(), a2.clone(), a3.clone()]));
+
+        // DateAdded Descending (default): should match original order [a1, a2, a3]
+        saved.sort(config::AlbumSortCriteria::DateAdded, config::SortOrder::Descending);
+        assert_eq!(saved.albums[0].name.as_ref(), "Zebra");
+        assert_eq!(saved.albums[1].name.as_ref(), "Apple");
+        assert_eq!(saved.albums[2].name.as_ref(), "Banana");
+
+        // DateAdded Ascending: reversed original order [a3, a2, a1]
+        saved.sort(config::AlbumSortCriteria::DateAdded, config::SortOrder::Ascending);
+        assert_eq!(saved.albums[0].name.as_ref(), "Banana");
+        assert_eq!(saved.albums[1].name.as_ref(), "Apple");
+        assert_eq!(saved.albums[2].name.as_ref(), "Zebra");
+
+        // AlbumName Ascending: Apple, Banana, Zebra
+        saved.sort(config::AlbumSortCriteria::AlbumName, config::SortOrder::Ascending);
+        assert_eq!(saved.albums[0].name.as_ref(), "Apple");
+        assert_eq!(saved.albums[1].name.as_ref(), "Banana");
+        assert_eq!(saved.albums[2].name.as_ref(), "Zebra");
+
+        // AlbumName Descending: Zebra, Banana, Apple
+        saved.sort(config::AlbumSortCriteria::AlbumName, config::SortOrder::Descending);
+        assert_eq!(saved.albums[0].name.as_ref(), "Zebra");
+        assert_eq!(saved.albums[1].name.as_ref(), "Banana");
+        assert_eq!(saved.albums[2].name.as_ref(), "Apple");
+
+        // Artist Ascending: Alice (Banana), Bob (Zebra), Charlie (Apple)
+        saved.sort(config::AlbumSortCriteria::Artist, config::SortOrder::Ascending);
+        assert_eq!(saved.albums[0].name.as_ref(), "Banana");
+        assert_eq!(saved.albums[1].name.as_ref(), "Zebra");
+        assert_eq!(saved.albums[2].name.as_ref(), "Apple");
+
+        // Artist Descending: Charlie (Apple), Bob (Zebra), Alice (Banana)
+        saved.sort(config::AlbumSortCriteria::Artist, config::SortOrder::Descending);
+        assert_eq!(saved.albums[0].name.as_ref(), "Apple");
+        assert_eq!(saved.albums[1].name.as_ref(), "Zebra");
+        assert_eq!(saved.albums[2].name.as_ref(), "Banana");
+    }
+
+    #[test]
+    fn test_saved_albums_add_remove() {
+        let a1 = dummy_album("1", "Zebra", "Bob");
+        let a2 = dummy_album("2", "Apple", "Charlie");
+        let mut saved = SavedAlbums::new(Vector::from(vec![a1.clone()]));
+
+        // Add an album
+        saved.add(a2.clone());
+        assert_eq!(saved.albums.len(), 2);
+        assert!(saved.set.contains("2"));
+
+        // Sort by AlbumName Ascending
+        saved.sort(config::AlbumSortCriteria::AlbumName, config::SortOrder::Ascending);
+        assert_eq!(saved.albums[0].name.as_ref(), "Apple");
+        assert_eq!(saved.albums[1].name.as_ref(), "Zebra");
+
+        // Remove album
+        saved.remove("2");
+        assert_eq!(saved.albums.len(), 1);
+        assert!(!saved.set.contains("2"));
+
+        // Sort again by DateAdded
+        saved.sort(config::AlbumSortCriteria::DateAdded, config::SortOrder::Descending);
+        assert_eq!(saved.albums.len(), 1);
+        assert_eq!(saved.albums[0].name.as_ref(), "Zebra");
+    }
 }
